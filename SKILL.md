@@ -18,16 +18,30 @@ Build the video as a sequence of independently reviewable scene contracts. Match
 - Do not use removed v1 fields: `reveal`, `handPath`, `direction`, `maskPaddingPx`, or `type`.
 - The browser editor is a layout and timing editor. Only an actual `render` output proves the stroke result.
 
-## Environment
+## Runtime and workspace boundary
 
-From the skill root, run:
+Treat the directory containing this `SKILL.md` as `SKILL_ROOT`. Treat the directory the
+user opened in Codex as `WORKSPACE_ROOT`.
+
+- Keep SRT files, illustrations, annotations, previews, and videos under `WORKSPACE_ROOT`.
+- Never write generated artifacts into `SKILL_ROOT`.
+- Run every command from `WORKSPACE_ROOT` and point uv at the Skill package explicitly.
+- Resolve `SKILL_ROOT` from the absolute Skill path supplied by Codex; do not assume the
+  Skill was installed globally or that the current directory is the Skill repository.
+
+Bootstrap the isolated runtime once:
 
 ```bash
-uv sync --locked
-uv run --locked srt-whiteboard doctor
+SKILL_ROOT="/absolute/path/to/.agents/skills/srt-whiteboard-animation"
+[ -f "${SKILL_ROOT:?}/pyproject.toml" ]
+uv sync --project "$SKILL_ROOT" --locked
+uv run --project "$SKILL_ROOT" --locked srt-whiteboard doctor
 ```
 
 Stop if `doctor` reports a missing editor or hand asset. System FFmpeg is preferred; PyAV is the supported fallback.
+
+All commands below assume the same validated `SKILL_ROOT` value and execute from
+`WORKSPACE_ROOT`. Relative input and output paths therefore belong to the user's project.
 
 ## Workflow and confirmation gates
 
@@ -36,7 +50,7 @@ Each numbered stage is a separate user confirmation gate. Finish the stage, show
 ### 1. Parse the SRT and propose scenes
 
 ```bash
-uv run --locked srt-whiteboard parse input.srt -o scene-plan.json
+uv run --project "$SKILL_ROOT" --locked srt-whiteboard parse input.srt -o scene-plan.json
 ```
 
 Read `warnings`; do not claim every scene is within 25–35 seconds when cue boundaries make that impossible. For each proposed scene, explain its one core idea, source cue range, visual subject, and duration. Do not generate images yet.
@@ -60,8 +74,8 @@ Show all images and wait for approval.
 Inspect both the approved image and its corresponding subtitles. Create `<image-stem>.annotation.json`. Map visible subjects to subtitle events in narrative order, not screen-coordinate order.
 
 ```bash
-uv run --locked srt-whiteboard validate scene.annotation.json --image scene.png
-uv run --locked srt-whiteboard editor
+uv run --project "$SKILL_ROOT" --locked srt-whiteboard validate scene.annotation.json --image scene.png
+uv run --project "$SKILL_ROOT" --locked srt-whiteboard editor
 ```
 
 The editor can adjust regions, array order, timing, labels, and subtitles. Saving must pass its local v2 validation. Wait for approval after the edited JSON is saved.
@@ -69,7 +83,8 @@ The editor can adjust regions, array order, timing, labels, and subtitles. Savin
 ### 4. Produce a static region audit
 
 ```bash
-uv run --locked srt-whiteboard preview scene.png scene.png.annotation.json scene-regions.jpg
+uv run --project "$SKILL_ROOT" --locked srt-whiteboard preview \
+  scene.png scene.annotation.json scene-regions.jpg
 ```
 
 Check ordering, bounds, timing labels, subject coverage, and dashed protected regions. Wait for approval.
@@ -79,7 +94,8 @@ Check ordering, bounds, timing labels, subject coverage, and dashed protected re
 The layout editor is not a stroke renderer. Produce the actual renderer proof:
 
 ```bash
-uv run --locked srt-whiteboard render scene.png scene.png.annotation.json scene-proof.mp4 \
+uv run --project "$SKILL_ROOT" --locked srt-whiteboard render \
+  scene.png scene.annotation.json scene-proof.mp4 \
   --cap-long-edge 640 --fps 24
 ```
 
@@ -88,8 +104,10 @@ Inspect the opening frame, each element transition, an overlap midpoint, and the
 ### 6. Render and assemble final scenes
 
 ```bash
-uv run --locked srt-whiteboard render scene.png scene.png.annotation.json scene-final.mp4
-uv run --locked srt-whiteboard merge --inputs scene-01-final.mp4 scene-02-final.mp4 --output final.mp4
+uv run --project "$SKILL_ROOT" --locked srt-whiteboard render \
+  scene.png scene.annotation.json scene-final.mp4
+uv run --project "$SKILL_ROOT" --locked srt-whiteboard merge \
+  --inputs scene-01-final.mp4 scene-02-final.mp4 --output final.mp4
 ```
 
 All scenes must share dimensions and frame rate; merge fails closed when their video contracts differ. Show the final MP4 and report its dimensions, duration, frame rate, and codec.

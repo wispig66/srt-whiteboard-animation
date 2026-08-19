@@ -24,6 +24,36 @@ uv sync --locked
 uv run --locked srt-whiteboard doctor
 ```
 
+## 作为 Codex Skill 使用
+
+Skill 源码和视频项目是两个不同的职责边界。把 Skill 安装到项目的
+`.agents/skills`，把字幕、图片、annotation 和视频保留在项目目录：
+
+```text
+my-whiteboard-project/
+├── .agents/skills/srt-whiteboard-animation/  # Skill 与渲染器
+├── input/                                    # SRT 与其它输入
+├── work/                                     # 分镜、图片、annotation、预览
+└── output/                                   # 最终视频
+```
+
+```bash
+mkdir -p my-whiteboard-project/.agents/skills
+git clone https://github.com/wispig66/srt-whiteboard-animation.git \
+  my-whiteboard-project/.agents/skills/srt-whiteboard-animation
+cd my-whiteboard-project/.agents/skills/srt-whiteboard-animation
+uv sync --locked
+```
+
+然后在 Codex 中打开 `my-whiteboard-project`，显式调用：
+
+```text
+$srt-whiteboard-animation 使用 input/narration.srt 制作白板动画
+```
+
+Codex 会从当前工作目录的 `.agents/skills` 发现 Skill。渲染器依赖属于 Skill，
+业务输入和生成产物属于当前视频项目；Skill 不应要求把素材复制进自身源码目录。
+
 ## 完整工作流
 
 ### 1. SRT 分镜建议
