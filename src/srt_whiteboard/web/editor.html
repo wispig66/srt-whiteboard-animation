@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SRT 白板动画 · 区域编辑器（无需服务器）</title>
+<title>SRT 白板动画 · Annotation v2 编辑器</title>
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #14161a; color: #e6e8ec; }
@@ -61,7 +61,7 @@
 </head>
 <body>
 <div class="topbar">
-  <div class="brand">SRT 白板 · 区域编辑器</div>
+  <div class="brand">SRT 白板 · Annotation v2 编辑器</div>
   <button id="openBtn" class="primary">打开文件夹…</button>
   <button id="prevBtn" disabled>‹</button>
   <select id="sceneSel" disabled></select>
@@ -78,15 +78,15 @@
   <div class="stage-wrap">
     <div id="hint" class="hint">
       点 <b>打开文件夹…</b> 选择存放线稿的目录（内含成对的 <code>&lt;名称&gt;.png</code> + <code>&lt;名称&gt;.annotation.json</code>）。<br><br>
-      载入后：默认显示完整图片和区域框；拖动方框整体移动、拖四角/四边缩放调 <code>region</code>；右侧精确改数值、方向、<b>开始/结束时间</b>与<b>字幕</b>；拖动模块列表可<b>调整顺序</b>。拖时间轴或按播放看<b>矩形代理揭示</b>（未开始区域不显示）。<br><br>
+      载入后：默认显示完整图片和区域框；拖动方框整体移动、拖四角/四边缩放调 <code>region</code>；右侧精确改数值、<b>开始/结束时间</b>与<b>字幕</b>；拖动模块列表会重排数组并自动重排时间，数组顺序就是唯一绘制顺序。<br><br>
       改完点 <b>保存本场景</b> / <b>全部保存</b> 写回原 <code>.annotation.json</code>（含每个区域的字幕）。<br>
-      <span class="muted">写回原文件需 Chrome / Edge（File System Access API）；其它浏览器将改为下载，请手动覆盖原文件。矩形代理只用于布局/时序；真实连续笔迹请用命令行 <code>render_stream_whiteboard.py</code> 渲染。</span>
+      <span class="muted">写回原文件需 Chrome / Edge（File System Access API）；其它浏览器将改为下载。时间轴仅验证区域和时序；真实连续笔迹请运行 <code>srt-whiteboard render</code>。</span>
     </div>
     <canvas id="canvas" hidden></canvas>
   </div>
   <aside class="side" id="side" hidden>
     <h3>绘制模块 <span id="elemCount" class="muted"></span></h3>
-    <p class="tip muted">拖动列表项可调整绘制顺序</p>
+    <p class="tip muted">数组顺序是唯一绘制顺序；拖动后时间自动连续重排</p>
     <ul id="elist" class="elist"></ul>
     <div class="row-btns">
       <button id="addBtn">＋ 新增模块</button>
@@ -99,13 +99,6 @@
       <label>y</label><input type="number" id="f_y" min="0" disabled>
       <label>宽</label><input type="number" id="f_w" min="1" disabled>
       <label>高</label><input type="number" id="f_h" min="1" disabled>
-      <label>方向</label>
-      <select id="f_dir" disabled>
-        <option value="top_to_bottom">从上至下</option>
-        <option value="bottom_to_top">从下至上</option>
-        <option value="left_to_right">从左至右</option>
-        <option value="right_to_left">从右至左</option>
-      </select>
       <label>开始(ms)</label><input type="number" id="f_start" min="0" step="100" disabled>
       <label>结束(ms)</label><input type="number" id="f_end" min="0" step="100" disabled>
       <label>时长(ms)</label><input type="number" id="f_dur" disabled>
@@ -131,18 +124,18 @@ const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
 
 const canvas = $('canvas'), ctx = canvas.getContext('2d');
 const mask = document.createElement('canvas'), maskCtx = mask.getContext('2d');
-const hand = new Image(); hand.src = './drawing-hand.png';
 
 const S = { scenes: [], idx: -1, cfg: null, cfgHandle: null, dirHandle: null,
             source: null, paper: '#fdf0d0', time: 0, sel: 0, playing: false, last: 0,
             showOverlay: true, dirty: new Set(), drag: null, dragRow: -1 };
 
 const els = () => S.cfg ? S.cfg.elements : [];
-const endMs = e => e.reveal.startMs + e.reveal.durationMs;
+const endMs = e => e.timing.startMs + e.timing.durationMs;
 function totalMs() {
   const arr = els();
   const maxEnd = arr.length ? Math.max(...arr.map(endMs)) : 0;
-  return Math.max(S.cfg && S.cfg.sceneDurationMs || 0, maxEnd + 500, 1000);
+  const hold = S.cfg && S.cfg.holdMs || 500;
+  return Math.max(S.cfg && S.cfg.sceneDurationMs || 0, maxEnd + hold, 1000);
 }
 
 // ---------- 打开文件夹 ----------
@@ -207,9 +200,16 @@ function loadScene(i) {
   const img = new Image();
   img.onload = () => {
     S.source = img;
-    if (!sc.cfg) sc.cfg = { sceneId: sc.name, canvas: { width: img.naturalWidth, height: img.naturalHeight }, sceneDurationMs: 8000, elements: [] };
-    if (!sc.cfg.canvas || !sc.cfg.canvas.width) sc.cfg.canvas = { width: img.naturalWidth, height: img.naturalHeight };
-    if (!Array.isArray(sc.cfg.elements)) sc.cfg.elements = [];
+    if (!sc.cfg) sc.cfg = {
+      schemaVersion: 2, sceneId: sc.name,
+      canvas: { width: img.naturalWidth, height: img.naturalHeight },
+      storyBasis: '请填写本幕叙事摘要', sceneDurationMs: 1000, holdMs: 500, elements: []
+    };
+    if (sc.cfg.schemaVersion !== 2) { toast(`${sc.cfgName} 不是 annotation v2`, true); return; }
+    if (!sc.cfg.canvas || sc.cfg.canvas.width !== img.naturalWidth || sc.cfg.canvas.height !== img.naturalHeight) {
+      toast(`${sc.cfgName} 的 canvas 与图片像素不一致`, true); return;
+    }
+    if (!Array.isArray(sc.cfg.elements)) { toast(`${sc.cfgName} 缺少 elements`, true); return; }
     S.cfg = sc.cfg; S.cfgHandle = sc.cfgHandle;
     samplePaper();
     updateSaveBtns(); syncEditor(); renderList(); renderSubs(); setTime(0); // 默认停在 0（未播放）→ 显示完整图片
@@ -228,19 +228,9 @@ function samplePaper() {
 }
 
 // ---------- reveal 代理渲染 ----------
-const getProgress = (t, e) => clamp((t - e.reveal.startMs) / e.reveal.durationMs, 0, 1);
-function wobble(a, s) { const env = Math.sin(a*Math.PI); return (Math.sin(a*Math.PI*2*3+s)*1.8 + Math.sin(a*Math.PI*2*7.3+s*1.7)*0.7) * env; }
-function tipPos(e, p) {
-  const hp = e.handPath || {}; const s = hp.start || [e.region.x, e.region.y], ed = hp.end || [e.region.x, e.region.y+e.region.height];
-  const d = e.reveal.direction, seed = e.region.x*0.13 + e.region.y*0.27, w = wobble(p, seed);
-  const x = s[0] + (ed[0]-s[0])*p, y = s[1] + (ed[1]-s[1])*p;
-  return (d==='top_to_bottom'||d==='bottom_to_top') ? [x+w, y] : [x, y+w];
-}
+const getProgress = (t, e) => clamp((t - e.timing.startMs) / e.timing.durationMs, 0, 1);
 function rect(e, p) {
   const r = e.region;
-  if (e.reveal.direction === 'left_to_right') return [r.x, r.y, r.x+r.width*p, r.y+r.height];
-  if (e.reveal.direction === 'right_to_left') return [r.x+r.width*(1-p), r.y, r.x+r.width, r.y+r.height];
-  if (e.reveal.direction === 'bottom_to_top') return [r.x, r.y+r.height*(1-p), r.x+r.width, r.y+r.height];
   return [r.x, r.y, r.x+r.width, r.y+r.height*p];
 }
 function render() {
@@ -255,8 +245,7 @@ function render() {
   if (showFull) {
     ctx.drawImage(S.source, 0, 0, w, h);
   } else {
-    let active = null;
-    const ordered = arr.slice().sort((a, b) => a.reveal.startMs - b.reveal.startMs);
+    const ordered = arr;
     mask.width = w; mask.height = h; maskCtx.clearRect(0, 0, w, h);
     ordered.forEach((e, index) => {
       const p = getProgress(S.time, e); if (!p) return;
@@ -264,15 +253,10 @@ function render() {
       maskCtx.save(); maskCtx.beginPath(); maskCtx.rect(x, y, x2-x, y2-y); maskCtx.clip(); maskCtx.drawImage(S.source, 0, 0, w, h); maskCtx.restore();
       maskCtx.save(); maskCtx.globalCompositeOperation = 'destination-out'; maskCtx.fillStyle = '#000';
       ordered.slice(index+1).forEach(later => { const r = later.region; maskCtx.fillRect(r.x, r.y, r.width, r.height); });
-      (e.reveal.protectedRegions || []).forEach(pr => maskCtx.fillRect(pr.x, pr.y, pr.width, pr.height));
+      (e.protectedRegions || []).forEach(pr => maskCtx.fillRect(pr.x, pr.y, pr.width, pr.height));
       maskCtx.restore();
-      if (p > 0 && p < 1) active = [e, p];
     });
     ctx.drawImage(mask, 0, 0);
-    if (active && hand.complete && hand.naturalWidth) {
-      const [e, p] = active, [tx, ty] = tipPos(e, p), s = w / 1672 * 0.42;
-      ctx.drawImage(hand, tx - 115*s, ty - 77*s, hand.width*s, hand.height*s);
-    }
   }
   if (S.showOverlay && arr.length) drawOverlay();
 }
@@ -308,7 +292,7 @@ function renderList() {
   const arr = els();
   $('elemCount').textContent = `共 ${arr.length} 个`;
   $('elist').innerHTML = arr.map((e, i) =>
-    `<li draggable="true" data-i="${i}" class="${i===S.sel?'sel':''}"><span class="grip">⋮⋮</span><span class="o">#${i+1}</span><span class="t">${(e.reveal.startMs/1000).toFixed(1)}s</span><span class="nm">${escapeHtml(e.label || '')}</span></li>`
+    `<li draggable="true" data-i="${i}" class="${i===S.sel?'sel':''}"><span class="grip">⋮⋮</span><span class="o">#${i+1}</span><span class="t">${(e.timing.startMs/1000).toFixed(1)}s</span><span class="nm">${escapeHtml(e.label || '')}</span></li>`
   ).join('');
   $('elist').querySelectorAll('li').forEach(li => {
     const i = +li.dataset.i;
@@ -323,8 +307,17 @@ function renderList() {
 function reorder(from, to) {
   const arr = els(); if (from < 0 || to < 0 || from === to) return;
   const [m] = arr.splice(from, 1); arr.splice(to, 0, m);
-  arr.forEach((e, i) => e.sequence = i + 1);       // 顺序即 sequence
+  reflowTimings(arr);
   S.sel = to; markDirty(); syncEditor(); renderList(); renderSubs(); render();
+}
+function reflowTimings(arr) {
+  if (!arr.length) return;
+  let cursor = Math.min(...arr.map(e => e.timing.startMs));
+  arr.forEach((e, i) => {
+    e.timing.startMs = cursor;
+    cursor += e.timing.durationMs + (i === arr.length - 1 ? 0 : 200);
+  });
+  S.cfg.sceneDurationMs = cursor + (S.cfg.holdMs || 500);
 }
 
 // ---------- 字幕列表（选中模块自动高亮）----------
@@ -338,38 +331,28 @@ function renderSubs() {
 }
 
 // ---------- 选中模块字段 ----------
-const F = ['f_label','f_x','f_y','f_w','f_h','f_dir','f_start','f_end','f_dur'];
+const F = ['f_label','f_x','f_y','f_w','f_h','f_start','f_end','f_dur'];
 function syncEditor() {
   const e = els()[S.sel], on = !!e;
   F.forEach(id => $(id).disabled = !on); $('f_dur').disabled = true; $('f_sub').disabled = !on; $('delBtn').disabled = !on;
   if (!on) { F.forEach(id => $(id).value = ''); $('f_sub').value = ''; return; }
   $('f_label').value = e.label || '';
   ['x','y','width','height'].forEach((k, j) => $(['f_x','f_y','f_w','f_h'][j]).value = Math.round(e.region[k]));
-  $('f_dir').value = e.reveal.direction;
-  $('f_start').value = e.reveal.startMs; $('f_end').value = endMs(e); $('f_dur').value = e.reveal.durationMs;
+  $('f_start').value = e.timing.startMs; $('f_end').value = endMs(e); $('f_dur').value = e.timing.durationMs;
   $('f_sub').value = e.subtitle || '';
-}
-function syncHandPath(e) {
-  const r = e.region, d = e.reveal.direction; e.handPath = e.handPath || {};
-  e.handPath.start = [r.x + r.width/2, r.y + r.height/2];
-  e.handPath.end = d === 'left_to_right' ? [r.x+r.width, r.y+r.height/2]
-    : d === 'right_to_left' ? [r.x, r.y+r.height/2]
-    : d === 'bottom_to_top' ? [r.x+r.width/2, r.y] : [r.x+r.width/2, r.y+r.height];
-  e.handPath.easing = e.handPath.easing || 'easeInOut';
 }
 function applyEditor() {
   const e = els()[S.sel]; if (!e) return;
   e.label = $('f_label').value || e.label;
-  e.region.x = Math.max(0, Math.round(+$('f_x').value || 0));
-  e.region.y = Math.max(0, Math.round(+$('f_y').value || 0));
-  e.region.width = Math.max(1, Math.round(+$('f_w').value || 1));
-  e.region.height = Math.max(1, Math.round(+$('f_h').value || 1));
-  e.reveal.direction = $('f_dir').value;
-  let start = Math.max(0, Math.round(+$('f_start').value || 0));
+  const W = S.cfg.canvas.width, H = S.cfg.canvas.height;
+  e.region.x = clamp(Math.round(+$('f_x').value || 0), 0, W - 1);
+  e.region.y = clamp(Math.round(+$('f_y').value || 0), 0, H - 1);
+  e.region.width = clamp(Math.round(+$('f_w').value || 1), 1, W - e.region.x);
+  e.region.height = clamp(Math.round(+$('f_h').value || 1), 1, H - e.region.y);
+  let start = Math.max(100, Math.round(+$('f_start').value || 100));
   let end = Math.max(start + 100, Math.round(+$('f_end').value || 0));
-  e.reveal.startMs = start; e.reveal.durationMs = end - start;
-  $('f_dur').value = e.reveal.durationMs; $('f_end').value = end;
-  syncHandPath(e);
+  e.timing.startMs = start; e.timing.durationMs = end - start;
+  $('f_dur').value = e.timing.durationMs; $('f_end').value = end;
   markDirty(); renderList(); renderSubs(); setTime(Math.min(S.time, totalMs())); render();
 }
 F.forEach(id => { if (id !== 'f_dur') $(id).addEventListener('input', applyEditor); });
@@ -381,15 +364,15 @@ $('addBtn').addEventListener('click', () => {
   const arr = els(), W = S.cfg.canvas.width, H = S.cfg.canvas.height;
   const seq = arr.length + 1;
   const lastEnd = arr.length ? Math.max(...arr.map(endMs)) : 300;
-  const e = { id: `region_${seq}`, label: '新模块', sequence: seq, narrativeRole: '', type: 'object', subtitle: '',
+  const e = { id: `region_${seq}`, label: '新模块', narrativeRole: '请填写叙事作用', subtitle: '请关联字幕',
     region: { x: Math.round(W*0.1), y: Math.round(H*0.1), width: Math.round(W*0.25), height: Math.round(H*0.3) },
-    reveal: { direction: 'top_to_bottom', startMs: lastEnd + 200, durationMs: 2000, maskPaddingPx: 22, protectedRegions: [] },
-    handPath: {} };
-  syncHandPath(e); arr.push(e); S.sel = arr.length - 1; markDirty(); syncEditor(); renderList(); renderSubs(); render();
+    timing: { startMs: lastEnd + 200, durationMs: 2000 }, protectedRegions: [] };
+  arr.push(e); S.cfg.sceneDurationMs = endMs(e) + (S.cfg.holdMs || 500);
+  S.sel = arr.length - 1; markDirty(); syncEditor(); renderList(); renderSubs(); render();
 });
 $('delBtn').addEventListener('click', () => {
   const arr = els(); if (S.sel < 0 || S.sel >= arr.length) return;
-  arr.splice(S.sel, 1); arr.forEach((e, i) => e.sequence = i + 1);
+  arr.splice(S.sel, 1); reflowTimings(arr);
   S.sel = Math.max(0, S.sel - 1); markDirty(); syncEditor(); renderList(); renderSubs(); render();
 });
 
@@ -419,7 +402,7 @@ canvas.addEventListener('pointermove', evt => {
     if (h.includes('b')) bottom = clamp(base.y+base.height+dy, top+min, H);
     r.x = Math.round(left); r.y = Math.round(top); r.width = Math.round(right-left); r.height = Math.round(bottom-top);
   }
-  syncHandPath(els()[S.sel]); markDirty(); syncEditor(); render();
+  markDirty(); syncEditor(); render();
 });
 canvas.addEventListener('pointerup', () => { S.drag = null; });
 
@@ -444,8 +427,14 @@ $('saveBtn').addEventListener('click', () => saveScene(S.idx));
 $('saveAllBtn').addEventListener('click', async () => { for (const i of [...S.dirty]) await saveScene(i); });
 async function saveScene(i) {
   const sc = S.scenes[i];
-  // 保存前把总时长对齐到当前编排（最后一个区域结束 + 0.5s 凝视），供渲染器使用
-  if (i === S.idx && sc.cfg.elements && sc.cfg.elements.length) sc.cfg.sceneDurationMs = totalMs();
+  if (sc.cfg.elements && sc.cfg.elements.length) {
+    const lastEnd = Math.max(...sc.cfg.elements.map(endMs));
+    sc.cfg.sceneDurationMs = lastEnd + (sc.cfg.holdMs || 500);
+  }
+  const expectedWidth = i === S.idx ? S.source.naturalWidth : sc.cfg.canvas.width;
+  const expectedHeight = i === S.idx ? S.source.naturalHeight : sc.cfg.canvas.height;
+  const validationError = validateConfig(sc.cfg, expectedWidth, expectedHeight);
+  if (validationError) { toast(`不能保存：${validationError}`, true); return; }
   const text = JSON.stringify(sc.cfg, null, 2);
   try {
     let handle = sc.cfgHandle;
@@ -458,6 +447,22 @@ async function saveScene(i) {
     S.dirty.delete(i); if (i === S.idx) $('dirtyFlag').textContent = '';
     updateSaveBtns(); toast(`已保存：${sc.name}`);
   } catch (e) { toast(`保存失败：${e.message}`, true); }
+}
+function validateConfig(cfg, expectedWidth, expectedHeight) {
+  if (!cfg || cfg.schemaVersion !== 2) return 'schemaVersion 必须为 2';
+  if (!cfg.canvas || cfg.canvas.width !== expectedWidth || cfg.canvas.height !== expectedHeight) return 'canvas 与图片像素不一致';
+  if (!Array.isArray(cfg.elements) || !cfg.elements.length) return '至少需要一个绘制模块';
+  const ids = new Set(); let previousEnd = 0;
+  for (const [index, e] of cfg.elements.entries()) {
+    if (!e.id || !/^[a-z0-9][a-z0-9_-]*$/.test(e.id)) return `模块 ${index+1} 的 id 非法`;
+    if (ids.has(e.id)) return `模块 id 重复：${e.id}`; ids.add(e.id);
+    const r = e.region;
+    if (!r || r.x < 0 || r.y < 0 || r.width < 1 || r.height < 1 || r.x+r.width > cfg.canvas.width || r.y+r.height > cfg.canvas.height) return `模块 ${e.id} 超出画布`;
+    if (!e.timing || e.timing.durationMs < 100 || e.timing.startMs < 100 || e.timing.startMs < previousEnd) return `模块 ${e.id} 的时间与前一模块重叠或没有首帧留白`;
+    previousEnd = endMs(e);
+  }
+  if (cfg.sceneDurationMs < previousEnd + (cfg.holdMs || 500)) return 'sceneDurationMs 未包含结尾停留';
+  return null;
 }
 function downloadText(name, text) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' })); a.download = name; a.click(); URL.revokeObjectURL(a.href); }
 

@@ -1,0 +1,185 @@
+{
+  "$defs": {
+    "Canvas": {
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "exclusiveMinimum": 0,
+          "title": "Height",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "title": "Canvas",
+      "type": "object"
+    },
+    "Element": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "narrativeRole": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Narrativerole",
+          "type": "string"
+        },
+        "subtitle": {
+          "minLength": 1,
+          "title": "Subtitle",
+          "type": "string"
+        },
+        "region": {
+          "$ref": "#/$defs/Rectangle"
+        },
+        "timing": {
+          "$ref": "#/$defs/Timing"
+        },
+        "protectedRegions": {
+          "items": {
+            "$ref": "#/$defs/Rectangle"
+          },
+          "title": "Protectedregions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "narrativeRole",
+        "subtitle",
+        "region",
+        "timing"
+      ],
+      "title": "Element",
+      "type": "object"
+    },
+    "Rectangle": {
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "minimum": 0,
+          "title": "X",
+          "type": "integer"
+        },
+        "y": {
+          "minimum": 0,
+          "title": "Y",
+          "type": "integer"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "exclusiveMinimum": 0,
+          "title": "Height",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "title": "Rectangle",
+      "type": "object"
+    },
+    "Timing": {
+      "additionalProperties": false,
+      "properties": {
+        "startMs": {
+          "minimum": 100,
+          "title": "Startms",
+          "type": "integer"
+        },
+        "durationMs": {
+          "minimum": 100,
+          "title": "Durationms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "startMs",
+        "durationMs"
+      ],
+      "title": "Timing",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Schema v2. Array order is the only narrative/drawing order.",
+  "properties": {
+    "schemaVersion": {
+      "const": 2,
+      "title": "Schemaversion",
+      "type": "integer"
+    },
+    "sceneId": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Sceneid",
+      "type": "string"
+    },
+    "canvas": {
+      "$ref": "#/$defs/Canvas"
+    },
+    "storyBasis": {
+      "minLength": 1,
+      "title": "Storybasis",
+      "type": "string"
+    },
+    "sceneDurationMs": {
+      "exclusiveMinimum": 0,
+      "title": "Scenedurationms",
+      "type": "integer"
+    },
+    "holdMs": {
+      "default": 500,
+      "maximum": 10000,
+      "minimum": 500,
+      "title": "Holdms",
+      "type": "integer"
+    },
+    "elements": {
+      "items": {
+        "$ref": "#/$defs/Element"
+      },
+      "minItems": 1,
+      "title": "Elements",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "sceneId",
+    "canvas",
+    "storyBasis",
+    "sceneDurationMs",
+    "elements"
+  ],
+  "title": "SRT Whiteboard Annotation v2",
+  "type": "object",
+  "$id": "https://github.com/wispig66/srt-whiteboard-animation/annotation-v2.schema.json"
+}
