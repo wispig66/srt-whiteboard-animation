@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "srt-whiteboard-animation"
+version = "2.0.0"
+description = "Turn SRT-driven scene plans into validated whiteboard animations."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "geeklee" }, { name = "wispig66" }]
+dependencies = [
+  "av>=15.0,<17",
+  "numpy>=2.0,<3",
+  "opencv-python-headless>=4.10,<5",
+  "pillow>=11.0,<13",
+  "pydantic>=2.12,<3",
+  "srt>=3.5,<4",
+]
+
+[project.scripts]
+srt-whiteboard = "srt_whiteboard.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4,<10",
+  "pytest-cov>=6.2,<8",
+  "ruff>=0.12,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/srt_whiteboard"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "SIM"]
+
+[tool.coverage.run]
+source = ["srt_whiteboard"]
+
+[tool.uv]
+exclude-newer = "2026-08-19T00:00:00Z"
